@@ -1,4 +1,5 @@
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE TupleSections #-}
 
 module Lets.Lens (
   fmapT
@@ -73,7 +74,7 @@ module Lets.Lens (
 , intOrLengthEven
 ) where
 
-import Control.Applicative(Applicative((<*>), pure))
+import Control.Applicative(Applicative((<*>), pure, liftA2))
 import Data.Char(toUpper)
 import Data.Foldable(Foldable(foldMap))
 import Data.Functor((<$>))
@@ -110,17 +111,19 @@ fmapT ::
   (a -> b)
   -> t a
   -> t b
-fmapT =
-  error "todo: fmapT"
+--fmapT f ta  = getIdentity $ traverse (Identity . f) ta
+fmapT f = getIdentity . traverse (Identity . f)
+  --error "todo: fmapT"
 
 -- | Let's refactor out the call to @traverse@ as an argument to @fmapT@.
+-- | traverse :: Applicative f => (a -> f b) -> t a -> f (t b)
 over :: 
   ((a -> Identity b) -> s -> Identity t)
   -> (a -> b)
   -> s
   -> t
-over =
-  error "todo: over"
+over tf f = getIdentity . tf (Identity . f)
+  -- error "todo: over"
 
 -- | Here is @fmapT@ again, passing @traverse@ to @over@.
 fmapTAgain ::
@@ -128,58 +131,66 @@ fmapTAgain ::
   (a -> b)
   -> t a
   -> t b
-fmapTAgain =
-  error "todo: fmapTAgain"
+fmapTAgain = over traverse
+  -- error "todo: fmapTAgain"
 
 -- | Let's create a type-alias for this type of function.
 type Set s t a b =
-  (a -> Identity b)
-  -> s
-  -> Identity t
+  (a -> Identity b) -> s -> Identity t
 
 -- | Let's write an inverse to @over@ that does the @Identity@ wrapping &
 -- unwrapping.
-sets ::
-  ((a -> b) -> s -> t)
-  -> Set s t a b  
-sets =
-  error "todo: sets"
+sets :: ((a -> b) -> s -> t) -> Set s t a b  
+sets = 
+  -- f :: (a -> b) -> s -> t)
+  -- i :: (a -> Identity b)
+  -- s :: s
+  -- \ f i s -> Identity $ f (getIdentity . i) s 
+      \ f i   -> Identity . f (getIdentity . i) -- compare with over
+-- over f i = getIdentity . f (Identity . i)  
 
 mapped ::
   Functor f =>
-  Set (f a) (f b) a b
-mapped =
-  error "todo: mapped"
+  Set (f a) (f b) a b -- Set (f a) (f b) a b  = (a -> Identity b) -> (f a) -> Identity (f b)
+mapped aib = 
+  Identity . fmap ( getIdentity . aib )
+  -- \fa -> Identity $ fmap ( getIdentity . aib ) fa
+  -- sets . fmap
 
 set ::
   Set s t a b
+  -- ( (a -> Identity b) -> s -> Identity t )
   -> s
   -> b
   -> t
-set =
-  error "todo: set"
+set stab s b = over stab (const b) s
+-- over :: Set s t a b -> (a -> b) -> s -> t
+  -- let x  = (flip stab) s -- :: (a -> I b) -> I t
+  -- in s 
 
 ----
 
 -- | Observe that @foldMap@ can be recovered from @traverse@ using @Const@.
 --
 -- /Reminder:/ foldMap :: (Foldable t, Monoid b) => (a -> b) -> t a -> b
+-- traverse :: Applicative f => (a -> f b) -> t a -> f (t b)
+-- data Const a b = Const {getConst :: a}
+--  instance [safe] Monoid a => Applicative (Const a)
 foldMapT ::
   (Traversable t, Monoid b) =>
   (a -> b)
   -> t a
   -> b
-foldMapT =
-  error "todo: foldMapT"
-
+foldMapT f ta = getConst $ traverse ( Const . f ) ta 
+  
 -- | Let's refactor out the call to @traverse@ as an argument to @foldMapT@.
 foldMapOf ::
   ((a -> Const r b) -> s -> Const r t)
   -> (a -> r)
   -> s
   -> r
-foldMapOf =
-  error "todo: foldMapOf"
+foldMapOf = \ t k s -> getConst $ t ( Const . k ) s
+ -- error "todo: foldMapOf"
 
 -- | Here is @foldMapT@ again, passing @traverse@ to @foldMapOf@.
 foldMapTAgain ::
@@ -187,13 +198,12 @@ foldMapTAgain ::
   (a -> b)
   -> t a
   -> b
-foldMapTAgain =
-  error "todo: foldMapTAgain"
+foldMapTAgain = foldMapOf traverse
+  --error "todo: foldMapTAgain"
 
 -- | Let's create a type-alias for this type of function.
 type Fold s t a b =
-  forall r.
-  Monoid r =>
+  forall r. Monoid r => 
   (a -> Const r b)
   -> s
   -> Const r t
@@ -205,14 +215,12 @@ folds ::
   -> (a -> Const b a)
   -> s
   -> Const t s
-folds =
-  error "todo: folds"
+folds t k = Const . t (getConst . k)
 
 folded ::
   Foldable f =>
   Fold (f a) (f a) a a
-folded =
-  error "todo: folded"
+folded = folds foldMap
 
 ----
 
@@ -223,42 +231,43 @@ type Get r s a =
   -> Const r s
 
 get ::
-  Get a s a
+  Get a s a -- (a -> Const a a) -> s -> Const a s
   -> s
   -> a
-get =
-  error "todo: get"
+get f = foldMapOf f id
+
+-- ((a -> Const r b) -> s -> Const r t) -> (a -> r) -> s -> r
 
 ----
 
 -- | Let's generalise @Identity@ and @Const r@ to any @Applicative@ instance.
 type Traversal s t a b =
-  forall f.
-  Applicative f =>
-  (a -> f b)
-  -> s
-  -> f t
+  forall f. Applicative f => 
+  (a -> f b) -> s -> f t
 
 -- | Traverse both sides of a pair.
 both ::
-  Traversal (a, a) (b, b) a b
-both =
-  error "todo: both"
-
+  Traversal (a, a) (b, b) a b -- (a -> f b) -> (a,a) -> f (b,b)
+both f (a,a') = liftA2 (,) (f a) (f a') 
+  
 -- | Traverse the left side of @Either@.
 traverseLeft ::
-  Traversal (Either a x) (Either b x) a b
-traverseLeft =
-  error "todo: traverseLeft"
+  Traversal (Either a x) (Either b x) a b -- (a -> f b) -> Either b x -> f (Either b x)
+traverseLeft f  s = 
+  case s of 
+    Left a -> fmap Left (f a)
+    Right x -> pure $ Right x
 
 -- | Traverse the right side of @Either@.
 traverseRight ::
   Traversal (Either x a) (Either x b) a b
-traverseRight =
-  error "todo: traverseRight"
+traverseRight f s =
+  case s of 
+    Left x -> pure $ Left x 
+    Right a -> fmap Right (f a)
 
-type Traversal' a b =
-  Traversal a a b b
+type Traversal' a b = Traversal a a b b
+-- Traversal a a b b = (b -> f b) -> a -> f a
 
 ----
 
@@ -267,12 +276,7 @@ type Traversal' a b =
 -- @Const r@ is @Functor@.
 --
 -- Consequently, we arrive at our lens derivation:
-type Lens s t a b =
-  forall f.
-  Functor f =>
-  (a -> f b)
-  -> s
-  -> f t
+type Lens s t a b = forall f. Functor f => (a -> f b) -> s -> f t
 
 ----
 
@@ -419,12 +423,12 @@ infixl 5 |=
 
 -- |
 --
+-- type Lens s t a b = forall f. Functor f => (a -> f b) -> s -> f t
 -- >>> modify fstL (*10) (3, "abc")
 -- (30,"abc")
 fstL ::
-  Lens (a, x) (b, x) a b
-fstL =
-  error "todo: fstL"
+  Lens (a, x) (b, x) a b -- Functor f => (a -> f b) -> (a,x) -> f (b, x)
+fstL f (a,x) = (,x) <$> (f a)
 
 -- |
 --
@@ -432,10 +436,13 @@ fstL =
 -- (13,"abcdef")
 sndL ::
   Lens (x, a) (x, b) a b
-sndL =
-  error "todo: sndL"
+sndL f (x, a) = (x,) <$> (f a) 
 
 -- |
+-- -- Map.lookup :: Ord k => k -> Map k a -> Maybe a
+-- -- Map.insert :: Ord k => k -> a -> Map k a -> Map k a
+-- -- Map.delete :: Ord k => k -> Map k a -> Map k a
+-- -- type Lens s t a b = forall f. Functor f => (a -> f b) -> s -> f t
 --
 -- >>> get (mapL 3) (Map.fromList (map (\c -> (ord c - 96, c)) ['a'..'d']))
 -- Just 'c'
@@ -457,12 +464,19 @@ sndL =
 mapL ::
   Ord k =>
   k
-  -> Lens (Map k v) (Map k v) (Maybe v) (Maybe v)
-mapL =
-  error "todo: mapL"
+  -> Lens (Map k v) (Map k v) (Maybe v) (Maybe v) -- ((Maybe v) -> f (Maybe v)) -> (Map k v) -> f (Map k v)
+mapL k f s =
+  let v = Map.lookup k s -- :: Maybe v
+  in 
+    maybe (Map.delete k s ) (\v -> Map.insert k v s) <$> (f v)
+
 
 -- |
---
+-- Set.insert :: Ord a => a -> Set.Set a -> Set.Set a
+-- Set.member :: Ord a => a -> Set.Set a -> Bool
+-- 
+-- -- type Lens s t a b = forall f. Functor f => (a -> f b) -> s -> f t
+
 -- >>> get (setL 3) (Set.fromList [1..5])
 -- True
 --
@@ -481,11 +495,15 @@ mapL =
 -- >>> set (setL 33) (Set.fromList [1..5]) False
 -- fromList [1,2,3,4,5]
 setL ::
-  Ord k =>
-  k
-  -> Lens (Set.Set k) (Set.Set k) Bool Bool
-setL =
-  error "todo: setL"
+  Ord k => k
+  -> Lens (Set.Set k) (Set.Set k) Bool Bool -- :: (B -> f B) -> S -> f S
+setL k f s = 
+  let exts = Set.member k s
+      fexts = f exts
+  in  
+    (\b -> 
+      if b then Set.insert k s else Set.delete k s
+    )  <$> fexts 
 
 -- |
 --
